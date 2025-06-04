@@ -1,12 +1,10 @@
-# Korean National Election Commission Data Analysis
+# 중앙선거관리위원회 선거 데이터 (개표과정) 데이터 및 간단 분석
 
-중앙선거관리위원회 선거 데이터 (개표과정) 분석
+* 21대 대통령선거 개표과정 중 snapshot을 떴었습니다. 이에 대한 데이터와 간단한 분석코드를 올립니다. 
+* 급하게 코드를 작성해서 데이터를 뽑아서 몇 가지 데이터들은 좀더 정리가 필요합니다 (극 초반의 개표현황이 빠져있고, 기권표, 무효표, 관외투표 등 시점을 개표집계구별 데이터와 전체 데이터에서 추정해내야합니다. 추후 업데잇할 예정입니다.)
+* 마지막 timestamp의 개표집계구별 데이터는 최종 개표결과로 활용하실 수 있습니다.
 
-21대 대통령선거 개표과정 중 snapshot을 떴었습니다. 이에 대한 데이터와 간단한 분석코드를 올립니다. 
-
-급하게 코드를 작성해서 데이터를 뽑아서 몇 가지 데이터들은 좀더 정리가 필요합니다 (극 초반의 개표현황이 빠져있고, 기권표, 무효표, 관외투표 등 시점을 개표집계구별 데이터와 전체 데이터에서 추정해내야합니다. 추후 업데잇할 예정입니다.)
-
-마지막 timestamp의 개표집계구별 데이터는 최종 개표결과로 활용하실 수 있습니다.
+아래부터는 LLM보고 이 데이터 내용과 한계 등을 정리해보라고 시킨 것입니다.
 
 A comprehensive dataset and analysis toolkit for Korean National Election Commission (NEC) election data, featuring both summary-level and detailed precinct-level results from the June 3, 2025 presidential election.
 
