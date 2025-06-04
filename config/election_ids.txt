@@ -1,0 +1,19 @@
+# Election IDs found in Korean National Election Commission data
+# Format: election_id|description|date
+# Pattern: 002YYYYMMDD where YYYY=year, MM=month, DD=day
+
+# Found in current HTML file:
+0020250603|제21대 대통령선거|2025-06-03
+0020250402|2025년 상반기 재·보궐선거|2025-04-02  
+0020241016|2024년 하반기 재·보궐선거|2024-10-16
+
+# Election ID Pattern for timestamp generation:
+# - Prefix: 002 (fixed)
+# - Year: YYYY (4 digits)
+# - Month: MM (2 digits, 01-12)
+# - Day: DD (2 digits, 01-31)
+#
+# Example generation for different election dates:
+# 2024-04-10 -> 0020240410
+# 2024-10-16 -> 0020241016  
+# 2025-06-03 -> 0020250603 

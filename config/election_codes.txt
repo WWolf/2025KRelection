@@ -1,0 +1,13 @@
+# Election Codes for Korean National Election Commission
+# Format: code|name_korean|name_english|statement_id_suffix
+1|대통령선거|Presidential Election|VCCP09_#1
+2|국회의원선거|National Assembly Election|VCCP09_#2
+3|시도지사선거|Provincial Governor Election|VCCP09_#3
+4|구시군장선거|Mayor/County Chief Election|VCCP09_#4
+5|시도의원선거|Provincial Council Election|VCCP09_#5_1
+6|구시군의원선거|Municipal Council Election|VCCP09_#6_1
+7|광역의원비례대표선거|Metropolitan Proportional Election|VCCP09_#7
+8|기초의원비례대표선거|Local Proportional Election|VCCP09_#8
+9|비례대표국회의원선거|Proportional National Assembly|VCCP09_#9
+10|교육감선거|Education Superintendent|VCCP09_#10_0
+11|국민투표|National Referendum|VCCP09_#11 

@@ -1,0 +1,1054 @@
+---
+title: "Analysis code example"
+author: "Nobody"
+date: "2025-06-03"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+#install.packages("showtext")
+#library(showtext)
+library(extrafont)
+
+# font_import()
+#loadfonts()
+
+# Initialize showtext
+#showtext_auto()
+theme_set(
+  theme_bw()  + 
+    theme(
+      plot.title    = element_text(size=20, family="NanumBarunGothicBold"),
+      plot.subtitle = element_text(size=15, family="NanumBarunGothic"),
+      text          = element_text(size=15, family="NanumBarunGothic")
+          )
+  
+)
+
+election_theme <-
+  theme(
+    plot.title = element_text( size = 10, face="bold" ),
+    plot.subtitle = element_text( size = 8 ),
+    plot.caption = element_text( size = 8 ),
+    axis.text = element_text( size = 8 ),
+    axis.title = element_text( size = 10 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 8 ),
+    axis.text.y = element_text( size = 8 ),
+    strip.text = element_text( size = 10 )
+  )
+
+"%ni%" <- Negate("%in%")
+
+```
+
+```{r}
+#!/usr/bin/env Rscript
+# -*- coding: utf-8 -*-
+# Simple Election Data Loader
+# Loads batch scraped data from data/ directory and formats it properly
+
+# Load required libraries
+library(tidyverse)
+library(readr)
+library(lubridate)
+
+# Function to load city codes mapping
+load_city_codes <- function() {
+  city_codes <- read_delim("../config/city_codes.txt", 
+                          delim = "|", 
+                          comment = "#", 
+                          col_names = c("code", "name_korean", "name_english"),
+                          show_col_types = FALSE)
+  return(city_codes)
+}
+
+# Function to parse batch directory name to extract timestamps
+parse_batch_directory <- function(dir_name) {
+  # Pattern: nec_data_electionId_date_time
+  parts <- str_split(dir_name, "_")[[1]]
+  if (length(parts) >= 4) {
+    election_id <- parts[3]
+    date_part <- parts[4]
+    time_part <- parts[5]
+    
+    # Convert to datetime
+    batch_timestamp <- ymd_hms(paste0(
+      str_sub(date_part, 1, 4), "-",
+      str_sub(date_part, 5, 6), "-", 
+      str_sub(date_part, 7, 8), " ",
+      str_sub(time_part, 1, 2), ":",
+      str_sub(time_part, 3, 4), ":",
+      str_sub(time_part, 5, 6)
+    ))
+    
+    return(list(
+      election_id = election_id,
+      batch_timestamp = batch_timestamp
+    ))
+  }
+  return(NULL)
+}
+
+# Function to parse CSV filename
+parse_csv_filename <- function(filename) {
+  # Pattern: citycode_cityname_date_time.csv
+  basename_file <- str_remove(basename(filename), "\\.csv$")
+  parts <- str_split(basename_file, "_")[[1]]
+  
+  if (length(parts) >= 3) {
+    city_code <- parts[1]
+    city_name <- parts[2]
+    date_part <- parts[3]
+    time_part <- parts[4]
+    
+    # Convert to datetime
+    file_timestamp <- ymd_hms(paste0(
+      str_sub(date_part, 1, 4), "-",
+      str_sub(date_part, 5, 6), "-", 
+      str_sub(date_part, 7, 8), " ",
+      str_sub(time_part, 1, 2), ":",
+      str_sub(time_part, 3, 4), ":",
+      str_sub(time_part, 5, 6)
+    ))
+    
+    return(list(
+      city_code = city_code,
+      city_name = city_name,
+      file_timestamp = file_timestamp
+    ))
+  }
+  return(NULL)
+}
+
+# Main function to load all election data
+load_all_election_data <- function(data_dir = "../data") {
+  cat("🚀 Loading election data from", data_dir, "\n")
+  
+  # Load city codes
+  city_codes <- load_city_codes()
+  cat("📋 Loaded", nrow(city_codes), "city codes\n")
+  
+  # Get all batch directories
+  batch_dirs <- list.dirs(data_dir, recursive = FALSE)
+  cat("📁 Found", length(batch_dirs), "batch directories\n")
+  
+  all_data <- list()
+  
+  for (batch_dir in batch_dirs) {
+    cat("📂 Processing", basename(batch_dir), "\n")
+    
+    # Parse batch directory info
+    batch_info <- parse_batch_directory(basename(batch_dir))
+    if (is.null(batch_info)) {
+      cat("⚠️  Could not parse batch directory:", basename(batch_dir), "\n")
+      next
+    }
+    
+    # Find all CSV files in this batch
+    csv_files <- list.files(batch_dir, pattern = "\\.csv$", full.names = TRUE)
+    
+    for (csv_file in csv_files) {
+      # Parse filename
+      file_info <- parse_csv_filename(csv_file)
+      if (is.null(file_info)) {
+        cat("⚠️  Could not parse filename:", basename(csv_file), "\n")
+        next
+      }
+      
+      # Read CSV data
+      tryCatch({
+        df <- read_csv(csv_file, locale = locale(encoding = "UTF-8"), show_col_types = FALSE)
+        
+        # Process based on whether it's 전체 (total) or city-specific
+        if (file_info$city_code == "0" && file_info$city_name == "전체") {
+          # For 전체 files: District becomes City, add District = "전체"
+          df <- df %>%
+            rename(City = District) %>%
+            mutate(District = "전체")
+        } else {
+          # For city-specific files: add City column from city codes
+          city_info <- city_codes %>% filter(code == file_info$city_code)
+          if (nrow(city_info) > 0) {
+            df <- df %>%
+              mutate(City = city_info$name_korean[1])
+          } else {
+            # Fallback to the parsed city name from filename
+            df <- df %>%
+              mutate(City = file_info$city_name)
+          }
+        }
+        
+        # Add metadata columns
+        df <- df %>%
+          mutate(
+            city_code = file_info$city_code,
+            batch_timestamp = batch_info$batch_timestamp,
+            file_timestamp = file_info$file_timestamp,
+            election_id = batch_info$election_id
+          )
+        
+        # Reorder columns to put metadata first
+        df <- df %>%
+          select(election_id, city_code, City, District, batch_timestamp, file_timestamp, everything())
+        
+        all_data[[length(all_data) + 1]] <- df
+        
+      }, error = function(e) {
+        cat("❌ Error reading", basename(csv_file), ":", e$message, "\n")
+      })
+    }
+  }
+  
+  # Combine all data
+  if (length(all_data) > 0) {
+    combined_data <- bind_rows(all_data)
+    cat("✅ Successfully loaded", nrow(combined_data), "rows from", length(all_data), "files\n")
+    cat("📊 Data range:", min(combined_data$batch_timestamp), "to", max(combined_data$batch_timestamp), "\n")
+    cat("🏙️  Cities:", length(unique(combined_data$City)), "\n")
+    
+    return(combined_data)
+  } else {
+    cat("❌ No data loaded\n")
+    return(NULL)
+  }
+}
+
+# Example usage:
+# Load all data
+# election_data <- load_all_election_data()
+
+# View structure
+# glimpse(election_data)
+
+# Check unique cities
+# election_data %>% distinct(City, city_code) %>% arrange(city_code)
+
+# Check data types by city
+# election_data %>% count(City, District) %>% arrange(City)
+```
+
+```{r}
+# Load all data
+election_data <- load_all_election_data()
+
+# View the structure
+glimpse(election_data)
+
+# Check what cities we have
+election_data %>% distinct(City, city_code) %>% arrange(city_code)
+
+# See the data types (total vs district-level)
+election_data %>% count(City, District) %>% arrange(City)
+
+```
+
+```{r}
+election_data$City %>% unique()
+```
+
+후보자별 득표수 합계와 무효투표수, 기권자수가 뽑히지 않았다.........하지만 계산 가능하다
+
+```{r}
+election_data %>% colnames()
+```
+# 후보별 득표수, 득표율 추이
+
+```{r}
+election_data %>%
+  dplyr::filter( city_code == 0 ) %>%
+  group_by( city_code ) %>%
+  dplyr::select( batch_timestamp, file_timestamp, City, ends_with("_Votes") ) %>%
+  dplyr::select( -Invalid_Votes, -Total_Votes ) %>%
+  pivot_longer( cols = ends_with("_Votes"), names_to = "candidate", values_to = "Votes" ) %>%
+  mutate(
+    candidate = gsub("_Votes", "", candidate ),
+    candidate2 = case_when(
+      grepl("이재명", candidate) ~ "이재명",
+      grepl("김문수", candidate) ~ "김문수",
+      grepl("이준석", candidate) ~ "이준석",
+      grepl("권영국", candidate) ~ "권영국",
+      TRUE ~ "기타"
+    ),
+    candidate2 = factor( candidate2, levels = c("이재명", "김문수", "이준석", "권영국", "기타")),
+    City = factor( City, levels = c("서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+  ) %>%
+  dplyr::filter( candidate2 != "기타", batch_timestamp != max(batch_timestamp) ) %>%
+  ggplot( aes( x = file_timestamp, y = Votes/10000, colour = candidate2 ) ) +
+  geom_line() +
+  facet_wrap( City ~ ., scale = "free_y" ) +
+  # scale_x_datetime(
+  #   date_breaks = "1 hour",
+  #   date_labels = "%m/%d\n%H:%M",  # Date on top line, time below
+  #   expand = c(0.01, 0.01)
+  # ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( label = scales::comma ) +
+  scale_colour_manual(
+    values = c(
+      "이재명" = "#1e4d9b",
+      "김문수" = "#e61e2b",
+      "이준석" = "#ea5504",
+      "권영국" = "#f7cc46"
+    )
+  ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    title = "개표시 후보별 득표수 변화",
+    colour = "후보",
+    y = "만표"
+  )
+
+```
+```{r}
+election_data %>%
+  dplyr::filter( city_code == 0 ) %>%
+  group_by( city_code ) %>%
+  dplyr::select( batch_timestamp, file_timestamp, City, ends_with("_Percentage") ) %>%
+  pivot_longer( cols = ends_with("_Percentage"), names_to = "candidate", values_to = "Percent" ) %>%
+  mutate(
+    candidate = gsub("_Votes", "", candidate ),
+    candidate2 = case_when(
+      grepl("이재명", candidate) ~ "이재명",
+      grepl("김문수", candidate) ~ "김문수",
+      grepl("이준석", candidate) ~ "이준석",
+      grepl("권영국", candidate) ~ "권영국",
+      TRUE ~ "기타"
+    ),
+    candidate2 = factor( candidate2, levels = c("이재명", "김문수", "이준석", "권영국", "기타")),
+    City = factor( City, levels = c("서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+    
+  ) %>%
+  dplyr::filter( candidate2 != "기타", batch_timestamp != max(batch_timestamp) ) %>%
+  ggplot( aes( x = file_timestamp, y = Percent/100, colour = candidate2 ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  facet_wrap( City ~ ., scale = "free_y" ) +
+  # scale_x_datetime(
+  #   date_breaks = "1 hour",
+  #   date_labels = "%m/%d\n%H:%M",  # Date on top line, time below
+  #   expand = c(0.01, 0.01)
+  # ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( label = scales::percent, expand = expansion( mult = c(0, 0.05 )) ) +
+  scale_colour_manual(
+    values = c(
+      "이재명" = "#1e4d9b",
+      "김문수" = "#e61e2b",
+      "이준석" = "#ea5504",
+      "권영국" = "#f7cc46"
+    )
+  ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    title = "개표시 후보별 득표율 변화",
+    colour = "후보",
+#    y = "만표"
+  )
+
+```
+
+# 선거인수, 투표수 정리
+
+`Eligible_Voters`는 선거인수. `Total_Votes`는 투표수.
+
+```{r}
+election_data %>%
+  dplyr::filter( batch_timestamp == max(batch_timestamp) ) %>%
+  dplyr::select( !ends_with("_Percentage" ) ) %>%
+  dplyr::select( !ends_with("_timestamp") ) %>%
+  mutate(
+    기권자수 = Eligible_Voters - Total_Votes
+  )
+```
+
+그런데 이게 처음에는 선거인수랑 투표수 자체가 변해버리는 문제가 있다.
+
+```{r}
+election_data %>%
+  dplyr::filter( city_code == 0 ) %>%
+  dplyr::filter( batch_timestamp != max(batch_timestamp) ) %>%
+  group_by(
+    election_id, city_code, City, District
+  ) %>%
+  dplyr::select( file_timestamp, City, Total_Votes, Eligible_Voters ) %>%
+  mutate(
+    City = factor( City, levels = c("서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도"))
+  ) %>% 
+  pivot_longer( cols = contains("_Vote"), names_to = "칼럼", values_to = "n" ) %>%
+  ggplot( aes( x = file_timestamp, y = n, colour = City ) ) +
+  geom_line() +
+  scale_y_continuous( label = scales::comma ) +
+  facet_wrap( . ~ 칼럼 ) +
+  theme(
+    text = element_text( size = 15 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1 )
+  )
+```
+개표율과 기권표를 다시 계산하기 위해서라면 이 선거인수와 투표수를 수정해야한다.
+
+
+# 데이터 정리
+
+```{r}
+election_data %>%
+  mutate(
+    City2 = ifelse( District == "전체", "전체", City ),
+    District2 = ifelse( District == "전체", City, District ),
+    City = City2,
+    District = District2,
+    City = factor( City, levels = c("전체", "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  )  %>%
+  group_by( City, District ) %>%
+  mutate(
+    `선거인수` = max( Eligible_Voters ),
+    `투표수` = max( Total_Votes ),
+    Abstentions = 선거인수 - Total_Votes,
+    Invalid_Votes = Total_Votes 
+      - 무소속송진호_Votes 
+      - 민주노동당권영국_Votes 
+      - 개혁신당이준석_Votes 
+      - 국민의힘김문수_Votes
+      - 더불어민주당이재명_Votes,
+    Counting_Rate = Total_Votes / 투표수,
+    # Use force_tz to treat the timestamp AS EDT (not convert from unknown to EDT)
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+#    batch_timestamp = lubridate::with_tz(batch_timestamp, "Asia/Seoul")    
+  ) %>%
+  write_tsv("../processed/개표진행상황.tsv")
+```
+
+
+# 개표율 추이
+
+## 전체 (광역별)
+
+```{r}
+election_data %>%
+  mutate(
+    City2 = ifelse( District == "전체", "전체", City ),
+    District2 = ifelse( District == "전체", City, District ),
+    City = City2,
+    District = District2,
+    City = factor( City, levels = c("전체", "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  )  %>%
+  group_by( City, District ) %>%
+  mutate(
+    `선거인수` = max( Eligible_Voters ),
+    `투표수` = max( Total_Votes ),
+    Abstentions = 선거인수 - Total_Votes,
+    Invalid_Votes = Total_Votes 
+      - 무소속송진호_Votes 
+      - 민주노동당권영국_Votes 
+      - 개혁신당이준석_Votes 
+      - 국민의힘김문수_Votes
+      - 더불어민주당이재명_Votes,
+    Counting_Rate = Total_Votes / 투표수,
+    # Use force_tz to treat the timestamp AS EDT (not convert from unknown to EDT)
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+#    batch_timestamp = lubridate::with_tz(batch_timestamp, "Asia/Seoul")    
+  ) %>%
+  dplyr::filter( batch_timestamp != max(batch_timestamp) ) %>%
+  dplyr::filter( City == "전체" ) %>%
+  mutate(
+    District = factor( District, levels = c( "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  ) %>%
+  ggplot( aes( x = file_timestamp, y = Counting_Rate, colour = District ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( expand = expansion( mult = c(0, 0) ), label = scales::percent ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    x = "한국 시각",
+    y = "개표율(%)"
+  )
+```
+
+## 서울특별시 사례
+
+```{r}
+election_data %>%
+  dplyr::filter( city_code == 0 ) %>%
+  group_by( city_code ) %>%
+  dplyr::select( batch_timestamp, file_timestamp, City, ends_with("_Percentage") ) %>%
+  pivot_longer( cols = ends_with("_Percentage"), names_to = "candidate", values_to = "Percent" ) %>%
+  mutate(
+    candidate = gsub("_Votes", "", candidate ),
+    candidate2 = case_when(
+      grepl("이재명", candidate) ~ "이재명",
+      grepl("김문수", candidate) ~ "김문수",
+      grepl("이준석", candidate) ~ "이준석",
+      grepl("권영국", candidate) ~ "권영국",
+      TRUE ~ "기타"
+    ),
+    candidate2 = factor( candidate2, levels = c("이재명", "김문수", "이준석", "권영국", "기타")),
+    City = factor( City, levels = c("서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+    
+  ) %>%
+  dplyr::filter( candidate2 != "기타", batch_timestamp != max(batch_timestamp) ) %>%
+  dplyr::filter( City == "서울특별시" ) %>%
+  ggplot( aes( x = file_timestamp, y = Percent/100, colour = candidate2 ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  facet_wrap( City ~ ., scale = "free_y" ) +
+  # scale_x_datetime(
+  #   date_breaks = "1 hour",
+  #   date_labels = "%m/%d\n%H:%M",  # Date on top line, time below
+  #   expand = c(0.01, 0.01)
+  # ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( label = scales::percent, expand = expansion( mult = c(0, 0.05 )) ) +
+  scale_colour_manual(
+    values = c(
+      "이재명" = "#1e4d9b",
+      "김문수" = "#e61e2b",
+      "이준석" = "#ea5504",
+      "권영국" = "#f7cc46"
+    )
+  ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    title = "개표시 후보별 득표율 변화",
+    colour = "후보",
+    y = "득표율(%)"
+  )
+
+```
+
+
+```{r}
+election_data %>%
+  mutate(
+    City2 = ifelse( District == "전체", "전체", City ),
+    District2 = ifelse( District == "전체", City, District ),
+    City = City2,
+    District = District2,
+    City = factor( City, levels = c("전체", "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  )  %>%
+  group_by( City, District ) %>%
+  mutate(
+    `선거인수` = max( Eligible_Voters ),
+    `투표수` = max( Total_Votes ),
+    Abstentions = 선거인수 - Total_Votes,
+    Invalid_Votes = Total_Votes 
+      - 무소속송진호_Votes 
+      - 민주노동당권영국_Votes 
+      - 개혁신당이준석_Votes 
+      - 국민의힘김문수_Votes
+      - 더불어민주당이재명_Votes,
+    Counting_Rate = Total_Votes / 투표수,
+    # Use force_tz to treat the timestamp AS EDT (not convert from unknown to EDT)
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+#    batch_timestamp = lubridate::with_tz(batch_timestamp, "Asia/Seoul")    
+  ) %>%
+  dplyr::filter( batch_timestamp != max(batch_timestamp) ) %>%
+  dplyr::filter( City == "서울특별시" ) %>%
+  # mutate(
+  #   District = factor( District, levels = c( "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  # ) %>%
+  ggplot( aes( x = file_timestamp, y = Counting_Rate, colour = District ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( expand = expansion( mult = c(0, 0) ), label = scales::percent ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    title = "개표당시 구별 개표율",
+    subtitle = "서울특별시",
+    x = "한국 시각",
+    y = "개표율(%)",
+    caption = "관외투표는 마지막에 추가된 것으로 보임"
+  )
+```
+
+```{r}
+election_data %>%
+  mutate(
+    City2 = ifelse( District == "전체", "전체", City ),
+    District2 = ifelse( District == "전체", City, District ),
+    City = City2,
+    District = District2,
+    City = factor( City, levels = c("전체", "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  )  %>%
+  group_by( City, District ) %>%
+  mutate(
+    `선거인수` = max( Eligible_Voters ),
+    `투표수` = max( Total_Votes ),
+    Abstentions = 선거인수 - Total_Votes,
+    Invalid_Votes = Total_Votes 
+      - 무소속송진호_Votes 
+      - 민주노동당권영국_Votes 
+      - 개혁신당이준석_Votes 
+      - 국민의힘김문수_Votes
+      - 더불어민주당이재명_Votes,
+    Counting_Rate = Total_Votes / 투표수,
+    # Use force_tz to treat the timestamp AS EDT (not convert from unknown to EDT)
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+#    batch_timestamp = lubridate::with_tz(batch_timestamp, "Asia/Seoul")    
+  ) %>%
+  dplyr::filter( batch_timestamp != max(batch_timestamp) ) %>%
+  dplyr::filter( City == "서울특별시" ) %>%
+  # mutate(
+  #   District = factor( District, levels = c( "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  # ) %>%
+  dplyr::select( batch_timestamp, file_timestamp, City, ends_with("_Percentage") ) %>%
+  pivot_longer( 
+    cols = ends_with("_Percentage"), 
+    names_to = "candidate", 
+    values_to = "Percent"
+  ) %>%
+  mutate(
+    candidate2 = case_when(
+      grepl("이재명", candidate) ~ "이재명",
+      grepl("김문수", candidate) ~ "김문수",
+      grepl("이준석", candidate) ~ "이준석",
+      grepl("권영국", candidate) ~ "권영국",
+      TRUE ~ "기타"
+    ),
+    candidate2 = factor( candidate2, levels = c("이재명", "김문수", "이준석", "권영국", "기타"))
+  ) %>%
+  ggplot( aes( x = file_timestamp, y = Percent/100, colour = candidate2 ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  facet_wrap( District ~ ., scale = "free_y" ) +
+  # scale_x_datetime(
+  #   date_breaks = "1 hour",
+  #   date_labels = "%m/%d\n%H:%M",  # Date on top line, time below
+  #   expand = c(0.01, 0.01)
+  # ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( label = scales::percent, expand = expansion( mult = c(0, 0.05 )) ) +
+  scale_colour_manual(
+    values = c(
+      "이재명" = "#1e4d9b",
+      "김문수" = "#e61e2b",
+      "이준석" = "#ea5504",
+      "권영국" = "#f7cc46"
+    )
+  ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    title = "개표시 후보별 득표율 변화",
+    subtitle = "서울특별시",
+    colour = "후보",
+    y = "득표율(%)"
+  )
+```
+
+```{r}
+election_data %>%
+  mutate(
+    City2 = ifelse( District == "전체", "전체", City ),
+    District2 = ifelse( District == "전체", City, District ),
+    City = City2,
+    District = District2,
+    City = factor( City, levels = c("전체", "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  )  %>%
+  group_by( City, District ) %>%
+  mutate(
+    `선거인수` = max( Eligible_Voters ),
+    `투표수` = max( Total_Votes ),
+    Abstentions = 선거인수 - Total_Votes,
+    Invalid_Votes = Total_Votes 
+      - 무소속송진호_Votes 
+      - 민주노동당권영국_Votes 
+      - 개혁신당이준석_Votes 
+      - 국민의힘김문수_Votes
+      - 더불어민주당이재명_Votes,
+    Counting_Rate = Total_Votes / 투표수,
+    # Use force_tz to treat the timestamp AS EDT (not convert from unknown to EDT)
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+#    batch_timestamp = lubridate::with_tz(batch_timestamp, "Asia/Seoul")    
+  ) %>%
+  dplyr::filter( batch_timestamp != max(batch_timestamp) ) %>%
+  dplyr::filter( City == "서울특별시" ) %>%
+  # mutate(
+  #   District = factor( District, levels = c( "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  # ) %>%
+  dplyr::select( batch_timestamp, file_timestamp, City, ends_with("_Votes") ) %>%
+  pivot_longer( 
+    cols = ends_with("_Votes"), 
+    names_to = "candidate", 
+    values_to = "Votes"
+  ) %>%
+  mutate(
+    candidate2 = case_when(
+      grepl("이재명", candidate) ~ "이재명",
+      grepl("김문수", candidate) ~ "김문수",
+      grepl("이준석", candidate) ~ "이준석",
+      grepl("권영국", candidate) ~ "권영국",
+      TRUE ~ "기타"
+    ),
+    candidate2 = factor( candidate2, levels = c("이재명", "김문수", "이준석", "권영국", "기타"))
+  ) %>%
+  dplyr::filter( candidate2 %ni% c("기타"), !is.na( candidate2) ) %>%
+  ggplot( aes( x = file_timestamp, y = Votes, colour = candidate2 ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  facet_wrap( District ~ . ) +
+  # scale_x_datetime(
+  #   date_breaks = "1 hour",
+  #   date_labels = "%m/%d\n%H:%M",  # Date on top line, time below
+  #   expand = c(0.01, 0.01)
+  # ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( 
+    label = scales::comma, 
+    expand = expansion( mult = c(0, 0.05 )) 
+  ) +
+  scale_colour_manual(
+    values = c(
+      "이재명" = "#1e4d9b",
+      "김문수" = "#e61e2b",
+      "이준석" = "#ea5504",
+      "권영국" = "#f7cc46"
+    )
+  ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    title = "개표 당시 후보별 득표수 변화",
+    subtitle = "서울특별시",
+    colour = "후보",
+    y = "득표수"
+  )
+```
+## 울산광역시 사례
+
+```{r}
+election_data %>%
+  dplyr::filter( city_code == 0 ) %>%
+  group_by( city_code ) %>%
+  dplyr::select( batch_timestamp, file_timestamp, City, ends_with("_Percentage") ) %>%
+  pivot_longer( cols = ends_with("_Percentage"), names_to = "candidate", values_to = "Percent" ) %>%
+  mutate(
+    candidate = gsub("_Votes", "", candidate ),
+    candidate2 = case_when(
+      grepl("이재명", candidate) ~ "이재명",
+      grepl("김문수", candidate) ~ "김문수",
+      grepl("이준석", candidate) ~ "이준석",
+      grepl("권영국", candidate) ~ "권영국",
+      TRUE ~ "기타"
+    ),
+    candidate2 = factor( candidate2, levels = c("이재명", "김문수", "이준석", "권영국", "기타")),
+    City = factor( City, levels = c("서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+    
+  ) %>%
+  dplyr::filter( candidate2 != "기타", batch_timestamp != max(batch_timestamp) ) %>%
+  dplyr::filter( City == "울산광역시" ) %>%
+  ggplot( aes( x = file_timestamp, y = Percent/100, colour = candidate2 ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  facet_wrap( City ~ ., scale = "free_y" ) +
+  # scale_x_datetime(
+  #   date_breaks = "1 hour",
+  #   date_labels = "%m/%d\n%H:%M",  # Date on top line, time below
+  #   expand = c(0.01, 0.01)
+  # ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( label = scales::percent, expand = expansion( mult = c(0, 0.05 )) ) +
+  scale_colour_manual(
+    values = c(
+      "이재명" = "#1e4d9b",
+      "김문수" = "#e61e2b",
+      "이준석" = "#ea5504",
+      "권영국" = "#f7cc46"
+    )
+  ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    title = "개표시 후보별 득표율 변화",
+    colour = "후보",
+#    y = "만표"
+  )
+
+```
+
+
+```{r}
+election_data %>%
+  mutate(
+    City2 = ifelse( District == "전체", "전체", City ),
+    District2 = ifelse( District == "전체", City, District ),
+    City = City2,
+    District = District2,
+    City = factor( City, levels = c("전체", "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  )  %>%
+  group_by( City, District ) %>%
+  mutate(
+    `선거인수` = max( Eligible_Voters ),
+    `투표수` = max( Total_Votes ),
+    Abstentions = 선거인수 - Total_Votes,
+    Invalid_Votes = Total_Votes 
+      - 무소속송진호_Votes 
+      - 민주노동당권영국_Votes 
+      - 개혁신당이준석_Votes 
+      - 국민의힘김문수_Votes
+      - 더불어민주당이재명_Votes,
+    Counting_Rate = Total_Votes / 투표수,
+    # Use force_tz to treat the timestamp AS EDT (not convert from unknown to EDT)
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+#    batch_timestamp = lubridate::with_tz(batch_timestamp, "Asia/Seoul")    
+  ) %>%
+  dplyr::filter( batch_timestamp != max(batch_timestamp) ) %>%
+  dplyr::filter( City == "울산광역시" ) %>%
+  # mutate(
+  #   District = factor( District, levels = c( "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  # ) %>%
+  ggplot( aes( x = file_timestamp, y = Counting_Rate, colour = District ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( expand = expansion( mult = c(0, 0) ), label = scales::percent ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    x = "한국 시각",
+    y = "개표율(%)"
+  )
+```
+
+```{r}
+election_data %>%
+  mutate(
+    City2 = ifelse( District == "전체", "전체", City ),
+    District2 = ifelse( District == "전체", City, District ),
+    City = City2,
+    District = District2,
+    City = factor( City, levels = c("전체", "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  )  %>%
+  group_by( City, District ) %>%
+  mutate(
+    `선거인수` = max( Eligible_Voters ),
+    `투표수` = max( Total_Votes ),
+    Abstentions = 선거인수 - Total_Votes,
+    Invalid_Votes = Total_Votes 
+      - 무소속송진호_Votes 
+      - 민주노동당권영국_Votes 
+      - 개혁신당이준석_Votes 
+      - 국민의힘김문수_Votes
+      - 더불어민주당이재명_Votes,
+    Counting_Rate = Total_Votes / 투표수,
+    # Use force_tz to treat the timestamp AS EDT (not convert from unknown to EDT)
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+#    batch_timestamp = lubridate::with_tz(batch_timestamp, "Asia/Seoul")    
+  ) %>%
+  dplyr::filter( batch_timestamp != max(batch_timestamp) ) %>%
+  dplyr::filter( City == "울산광역시" ) %>%
+  # mutate(
+  #   District = factor( District, levels = c( "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  # ) %>%
+  dplyr::select( batch_timestamp, file_timestamp, City, ends_with("_Percentage") ) %>%
+  pivot_longer( 
+    cols = ends_with("_Percentage"), 
+    names_to = "candidate", 
+    values_to = "Percent"
+  ) %>%
+  mutate(
+    candidate2 = case_when(
+      grepl("이재명", candidate) ~ "이재명",
+      grepl("김문수", candidate) ~ "김문수",
+      grepl("이준석", candidate) ~ "이준석",
+      grepl("권영국", candidate) ~ "권영국",
+      TRUE ~ "기타"
+    ),
+    candidate2 = factor( candidate2, levels = c("이재명", "김문수", "이준석", "권영국", "기타"))
+  ) %>%
+  ggplot( aes( x = file_timestamp, y = Percent/100, colour = candidate2 ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  facet_wrap( District ~ ., scale = "free_y" ) +
+  # scale_x_datetime(
+  #   date_breaks = "1 hour",
+  #   date_labels = "%m/%d\n%H:%M",  # Date on top line, time below
+  #   expand = c(0.01, 0.01)
+  # ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( label = scales::percent, expand = expansion( mult = c(0, 0.05 )) ) +
+  scale_colour_manual(
+    values = c(
+      "이재명" = "#1e4d9b",
+      "김문수" = "#e61e2b",
+      "이준석" = "#ea5504",
+      "권영국" = "#f7cc46"
+    )
+  ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    title = "개표시 후보별 득표율 변화",
+    subtitle = "울산광역시",
+    colour = "후보",
+    y = "득표율(%)"
+  )
+```
+
+```{r}
+election_data %>%
+  mutate(
+    City2 = ifelse( District == "전체", "전체", City ),
+    District2 = ifelse( District == "전체", City, District ),
+    City = City2,
+    District = District2,
+    City = factor( City, levels = c("전체", "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  )  %>%
+  group_by( City, District ) %>%
+  mutate(
+    `선거인수` = max( Eligible_Voters ),
+    `투표수` = max( Total_Votes ),
+    Abstentions = 선거인수 - Total_Votes,
+    Invalid_Votes = Total_Votes 
+      - 무소속송진호_Votes 
+      - 민주노동당권영국_Votes 
+      - 개혁신당이준석_Votes 
+      - 국민의힘김문수_Votes
+      - 더불어민주당이재명_Votes,
+    Counting_Rate = Total_Votes / 투표수,
+    # Use force_tz to treat the timestamp AS EDT (not convert from unknown to EDT)
+    file_timestamp = force_tz(file_timestamp, tzone = "America/New_York"),
+    file_timestamp = with_tz(file_timestamp, tzone = "Asia/Seoul")
+#    batch_timestamp = lubridate::with_tz(batch_timestamp, "Asia/Seoul")    
+  ) %>%
+  dplyr::filter( batch_timestamp != max(batch_timestamp) ) %>%
+  dplyr::filter( City == "울산광역시" ) %>%
+  # mutate(
+  #   District = factor( District, levels = c( "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도")),
+  # ) %>%
+  dplyr::select( batch_timestamp, file_timestamp, City, ends_with("_Votes") ) %>%
+  pivot_longer( 
+    cols = ends_with("_Votes"), 
+    names_to = "candidate", 
+    values_to = "Votes"
+  ) %>%
+  mutate(
+    candidate2 = case_when(
+      grepl("이재명", candidate) ~ "이재명",
+      grepl("김문수", candidate) ~ "김문수",
+      grepl("이준석", candidate) ~ "이준석",
+      grepl("권영국", candidate) ~ "권영국",
+      TRUE ~ "기타"
+    ),
+    candidate2 = factor( candidate2, levels = c("이재명", "김문수", "이준석", "권영국", "기타"))
+  ) %>%
+  dplyr::filter( candidate2 %ni% c("기타"), !is.na( candidate2) ) %>%
+  ggplot( aes( x = file_timestamp, y = Votes, colour = candidate2 ) ) +
+  geom_line() +
+  expand_limits( y = 0 ) +
+  facet_wrap( District ~ . ) +
+  # scale_x_datetime(
+  #   date_breaks = "1 hour",
+  #   date_labels = "%m/%d\n%H:%M",  # Date on top line, time below
+  #   expand = c(0.01, 0.01)
+  # ) +
+  scale_x_datetime( date_breaks = "1 hour", date_labels = "%H:%M" ) +
+  scale_y_continuous( 
+    label = scales::comma, 
+    expand = expansion( mult = c(0, 0.05 )) 
+  ) +
+  scale_colour_manual(
+    values = c(
+      "이재명" = "#1e4d9b",
+      "김문수" = "#e61e2b",
+      "이준석" = "#ea5504",
+      "권영국" = "#f7cc46"
+    )
+  ) +
+  theme(
+    text = element_text( size = 12 ),
+    axis.text.y = element_text( size = 6 ),
+    axis.text.x = element_text( angle = 45, hjust = 1, size = 6 ),
+    legend.text = element_text( size = 10 ),
+    strip.text = element_text( size = 10 ),
+    axis.title.x = element_blank()
+  ) +
+  labs(
+    title = "개표 당시 후보별 득표수 변화",
+    subtitle = "울산광역시",
+    colour = "후보",
+    y = "득표수"
+  )
+```

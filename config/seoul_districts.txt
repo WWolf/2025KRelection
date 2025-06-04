@@ -1,0 +1,28 @@
+# Seoul District Codes (Town Codes) for Korean National Election Commission
+# Format: code|name_korean|name_english
+-1|전체선택|All Districts
+1101|종로구|Jongno-gu
+1102|중구|Jung-gu
+1103|용산구|Yongsan-gu
+1104|성동구|Seongdong-gu
+1105|광진구|Gwangjin-gu
+1106|동대문구|Dongdaemun-gu
+1107|중랑구|Jungnang-gu
+1108|성북구|Seongbuk-gu
+1109|강북구|Gangbuk-gu
+1110|도봉구|Dobong-gu
+1111|노원구|Nowon-gu
+1112|은평구|Eunpyeong-gu
+1113|서대문구|Seodaemun-gu
+1114|마포구|Mapo-gu
+1115|양천구|Yangcheon-gu
+1116|강서구|Gangseo-gu
+1117|구로구|Guro-gu
+1118|금천구|Geumcheon-gu
+1119|영등포구|Yeongdeungpo-gu
+1120|동작구|Dongjak-gu
+1121|관악구|Gwanak-gu
+1122|서초구|Seocho-gu
+1123|강남구|Gangnam-gu
+1124|송파구|Songpa-gu
+1125|강동구|Gangdong-gu 
