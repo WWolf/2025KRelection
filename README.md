@@ -7,13 +7,13 @@
 
 이 데이터나 코드를 참조하실 경우, 이 깃헙을 cite하시고 Issue로 남겨주시면 감사히 읽겠습니다.
 
-## 참고
+**참고**
 
 * [2024년 총선결과](https://github.com/WWolf/2024KRelection_commentary/tree/main/election_data) 
 
 아래부터는 LLM보고 이 데이터 내용과 한계 등을 정리해보라고 시킨 것입니다.
 
-A comprehensive dataset and analysis toolkit for Korean National Election Commission (NEC) election data, featuring both summary-level and detailed precinct-level results from the June 3, 2025 presidential election.
+A comprehensive dataset and a simple analysis for Korean National Election Commission (NEC) election data, featuring both summary-level and detailed precinct-level results from the June 3, 2025 presidential election.
 
 ## Overview
 
